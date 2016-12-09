@@ -1,0 +1,905 @@
+Hello
+
+i have a problem with a ITAB.
+when i send this itab to the EXCEL, the data from the col ECIV_AG_CODE are not just.
+this col give not same from the ITAB.
+
+Do you have a solution at this problem ?
+
+Thank you
+
+MAIN PROGRAM
+
+`&---------------------------------------------------------------------
+*& Report ZHRA_PTPEL_TEST_EXCEL
+*&
+&---------------------------------------------------------------------
+
+REPORT ZHRA_PTPEL_TEST_EXCEL.
+
+*Fichiers d'entête et des routines
+INCLUDE ZHRA_PTPEL_TEST_EXCEL_DATA.
+*INCLUDE ZHRA_PTPEL_TEST_DATA.
+*INCLUDE ZHRA_ECHEANCE_AMEN_DATA.
+INCLUDE ZHRA_PTPEL_TEST_EXCEL_FORM.
+*INCLUDE ZHRA_PTPEL_TEST_FORM.
+*INCLUDE ZHRA_ECHEANCE_AMEN_FORM.
+
+DATA: lo_excel TYPE REF TO zcl_excel,
+lo_worksheet TYPE REF TO zcl_excel_worksheet,
+lo_style TYPE REF TO zcl_excel_style,
+lo_style_date TYPE REF TO zcl_excel_style,
+lo_style_editable TYPE REF TO zcl_excel_style,
+lo_data_validation TYPE REF TO zcl_excel_data_validation.
+
+DATA: lt_field_catalog TYPE zexcel_t_fieldcatalog,
+ls_table_settings TYPE zexcel_s_table_settings,
+ls_table_settings_out TYPE zexcel_s_table_settings.
+
+DATA: lv_style_guid TYPE zexcel_cell_style.
+
+DATA: lv_row TYPE char10.
+
+FIELD-SYMBOLS: <fs_field_catalog> TYPE zexcel_s_fieldcatalog.
+
+CONSTANTS: gc_save_file_name TYPE string VALUE 'PTPEL.xlsx'.
+INCLUDE zdemo_excel_outputopt_incl.
+START-OF-SELECTION.
+
+refresh itab.
+
+refresh tbindbw .
+
+get peras.
+
+clear line_itab.
+clear nbr_enfants.
+clear nbr_enfantsmoins18.
+clear nbr_enfantsplus18.
+
+LOOP at P0037 where subty = '0002' AND ( ZZCDA = 'O' OR ZZCDA = 'F') AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+
+LOOP at p9049 into it9049 where subty = '0002' AND pernr = p0037-pernr.
+
+SELECT personid_ext from pa0709 into personid_ext where pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+move personid_ext to line_itab-personid_ext.
+
+ENDSELECT.
+
+move p0037-pernr to line_itab-pernr.
+move pn-begda to line_itab-debut_per_conc.
+move pn-endda to line_itab-fin_per_conc.
+
+SELECT * from pa0002 into it0002 where pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+move it0002-nachn to line_itab-Nom.
+move it0002-vorna to line_itab-Prenom.
+move it0002-gbdat to line_itab-date_naissance.
+move it0002-ZRSZRR to line_itab-niss.
+move it0002-gesch to line_itab-sexe.
+move it0002-famdt to line_itab-effet_civil.
+*move it0002-anzkd to line_itab-nbre_enfantsIT0002.
+
+   SELECT * from T502T into it502t where sprsl = 'F' and FAMST = it0002-FAMST .
+     move it502t-ftext to line_itab-Eciv_ULB.
+   ENDSELECT.
+langue = '1'.
+
+move langue to line_itab-langue.
+
+ENDSELECT.
+
+SELECT * from pa0006 into it0006 where subty ='1' AND pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+
+move it0006-STRAS to line_itab-Rue.
+move it0006-locat to line_itab-complement_adresse.
+move it0006-HSNMR to line_itab-numero.
+move it0006-POSTA to line_itab-boite.
+move it0006-PSTLZ to line_itab-cp.
+move it0006-ORT01 to line_itab-ville.
+*move it0006-land1 to line_itab-pays.
+
+SELECT * from T5B0K into itT5B0K where LAND1 = it0006-land1 .
+move itT5B0K-BELDK to line_itab-pays.
+ENDSELECT.
+
+ENDSELECT.
+
+SELECT * FROM pa0138 into table it0138 WHERE PERNR = p0037-pernr AND BVXTL = 'X' AND BEGDA <= pn-endda AND ENDDA >= pn-begda .
+
+SELECT * FROM pa0021 into table it0021 where ( subty = '1' or subty ='13' or subty = '2') AND PERNR = p0037-pernr .
+*AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+
+LOOP at it0021 where ( subty = '1' or subty ='13' or subty = '2') AND PERNR = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda. .
+
+IF IT0021-famsa = '1'.
+
+   conj_cohab_ulb_txt = 'Conjoint(e)'.
+
+ move Conj_cohab_ulb_txt to line_itab-Conj_cohab_ulb.
+ENDIF.
+
+ IF it0021-famsa = '13'.
+
+ conj_cohab_ulb_txt = 'Cohab'.
+
+ move Conj_cohab_ulb_txt to line_itab-Conj_cohab_ulb.
+ENDIF.
+
+*nbr_enfants = 0.
+
+if it0021-FAMSA = '2' AND it0138-BVXTL = 'X'.
+  nbr_enfants = nbr_enfants + 1 .
+ENDIF.
+*move nbr_enfants to line_itab-nbre_enfants.
+""""""""""" Calcul du nombre d'enfants en fonction des règlees de calcul à savoir en dessous de 18 ans ou entre 18 et 24 mais à charge
+
+IF it0021-FAMSA = '2'.
+
+DATA : BIRTH_DATE LIKE SY-DATUM,
+
+DAYS TYPE NUM2,
+
+MONTHS TYPE NUM2,
+
+YEARS TYPE NUM2.
+
+BIRTH_DATE = it0021-FGBDT.
+
+CALL FUNCTION 'HRCM_TIME_PERIOD_CALCULATE'
+
+EXPORTING
+
+BEGDA = BIRTH_DATE
+
+ENDDA = SY-DATUM
+
+IMPORTING
+
+NOYRS = YEARS
+
+NOMNS = MONTHS
+
+NODYS = DAYS
+
+EXCEPTIONS
+
+INVALID_DATES = 1
+
+OVERFLOW = 2
+
+OTHERS = 3.
+
+AGE = YEARS.
+*WRITE : / YEARS , 'years' , MONTHS , 'months' , DAYS , 'days'.
+
+IF AGE < 18.
+LOOP at it0021 where pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda AND SUBTY = '2' AND OBJPS = it0021-objps AND FGBDT = it0021-FGBDT .
+
+nbr_enfantsmoins18 = nbr_enfantsmoins18 + 1.
+ENDLOOP.
+ENDIF.
+
+IF ( AGE >= 18 AND AGE <= 24 ) .
+LOOP at it0021 where pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda AND SUBTY = '2' AND FGBDT = it0021-FGBDT .
+LOOP at it0138 where pernr = p0037-pernr AND BVXTL = 'X' AND BEGDA <= pn-endda AND ENDDA >= pn-begda AND SUBTY = '2' AND OBJPS = it0021-OBJPS.
+
+nbr_enfantsplus18 = nbr_enfantsplus18 + 1.
+ENDLOOP.
+ENDLOOP.
+ENDIF.
+
+ENDIF.
+ENDLOOP.
+
+nbr_enfants = nbr_enfantsmoins18 + nbr_enfantsplus18 .
+move nbr_enfants to line_itab-nbre_enfantsIT0002.
+
+If line_itab-Eciv_ULB = 'Célib' AND line_itab-Conj_cohab_ulb = ''.
+
+ line_itab-Eciv_AG_CODE = '2'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'CohLeg' AND line_itab-Conj_cohab_ulb = 'Cohab'.
+
+ line_itab-Eciv_AG_CODE = '1'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Célib' AND line_itab-Conj_cohab_ulb = 'Cohab'.
+
+ line_itab-Eciv_AG_CODE = 'D'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Divor.' .
+
+*AND line_itab-Conj_cohab_ulb = ''
+
+ line_itab-Eciv_AG_CODE = '2'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Divor.' AND line_itab-Conj_cohab_ulb = 'Cohab'.
+
+ line_itab-Eciv_AG_CODE = 'D'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Mar.EU' AND line_itab-Conj_cohab_ulb = 'Conjoint(e)'.
+
+ line_itab-Eciv_AG_CODE = '1'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Marié' AND line_itab-Conj_cohab_ulb = 'Conjoint(e)'.
+
+ line_itab-Eciv_AG_CODE = '1'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Veuf' .
+
+ line_itab-Eciv_AG_CODE = '3'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Veuf' AND  line_itab-Conj_cohab_ulb = 'Cohab' .
+
+ line_itab-Eciv_AG_CODE = 'D'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'SépFai' AND line_itab-Conj_cohab_ulb = ''.
+
+ line_itab-Eciv_AG_CODE = '1'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'SépFai' AND  line_itab-Conj_cohab_ulb = 'Conjoint(e)' .
+
+ line_itab-Eciv_AG_CODE = '1'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'SépFai' AND line_itab-Conj_cohab_ulb = 'Cohab' .
+
+ line_itab-Eciv_AG_CODE = 'D'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Separé'.
+
+ line_itab-Eciv_AG_CODE = '2'.
+ENDIF.
+
+If line_itab-Eciv_ULB = 'Separé' AND line_itab-Conj_cohab_ulb = 'Cohab' .
+
+ line_itab-Eciv_AG_CODE = '1'.
+ENDIF.
+
+*nbr_enfants_handi = 0.
+*
+
+SELECT * from pa0138 into it0138 where pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda AND SUBTY = '2'. ""BVXMV = 'X' AND pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+*LOOP AT IT0138.
+*IF it0138-BVXMV = 'X'.
+*nbr_enfants_handi = nbr_enfants_handi + '1' .
+*
+*move nbr_enfants_handi to line_itab-nbr_enfants_handi.
+*ENDIF.
+*
+*
+*ENDLOOP.
+*
+*ENDSELECT.
+
+SELECT * from pa0101 into it0101 where pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+
+move it0101-BVKTL to line_itab-nbre_enfantsIT0101.
+move it0101-BVMKT to line_itab-nbr_enfants_handi.
+ENDSELECT.
+SELECT * from pa0009 into it0009 where pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+
+move it0009-IBAN to iban.
+
+SELECT * from BNKA into itbnka where BANKL = it0009-bankl.
+ENDSELECT.
+
+cle_bancaire = itbnka-swift.
+
+cle_bancaire = itbnka-swift.
+move cle_bancaire to swift.
+
+CONCATENATE iban '/' swift into Compte_bancaire.
+
+move Compte_bancaire to line_itab-compte_bancaire.
+ENDSELECT.
+
+statut_juridique = '2'.
+
+move statut_juridique to line_itab-statut_juridique.
+
+SELECT * from pa0001 into it0001 where pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+
+ move it0001-persk  to line_itab-fonction.
+*if it0001-persk = 'PA' or it0001-persk = 'PP'.
+*
+
+fonction = 'A'.
+move fonction to line_itab-fonction.
+ENDIF.
+if it0001-persk = 'S5' or it0001-persk = 'S9'.
+fonction = 'S'.
+move fonction to line_itab-fonction.
+ENDIF.
+move it0001-begda to line_itab-Date_entre_act.
+
+if it0001-ANSVH = '13' or it0001-ANSVH = '14'.
+
+  duree = 'I'.
+
+  move duree to line_itab-duree.
+
+  ENDIF.
+
+  if it0001-ANSVH = '23' or it0001-ANSVH = '24'.
+
+  duree = 'D'.
+
+  move duree to line_itab-duree.
+
+  ENDIF.
+*****ZZETP_ADM *100
+
+ZZETP_ADM = it0001-ZZETP_ADM * 100.
+
+move ZZETP_ADM to line_itab-ZZETP_ADM.
+
+ENDSELECT.
+
+move it9049-DATE_IN_VERIF_PTPEL to line_itab-DATE_IN_VERIF_PTPEL.
+
+SELECT * from pa0105 into it0105 where SUBTY = '0010' AND pernr = p0037-pernr AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+
+move it0105-USRID_LONG to line_itab-mail.
+ENDSELECT.
+
+SELECT * from pa0000 into it0000 WHERE pernr = p0037-pernr AND ( MASSN ='10' OR MASSN = '34' OR MASSN = '70' OR MASSN = '75') AND BEGDA <= pn-endda AND ENDDA >= pn-begda. "AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+
+move it0000-begda to line_itab-date_depart.
+
+move it0000-MASSN to MASSN.
+IF MASSN = '34'.
+
+IT0000-MASSG = '00'.
+
+ENDIF.
+
+move it0000-MASSG to MASSG.
+
+CONCATENATE MASSN''MASSG into motif_depart .
+
+*move it0000-MASSN to line_itab-motif_depart.
+move motif_depart to line_itab-motif_depart.
+
+ENDSELECT.
+
+*DATA : IT0008BET01 LIKE it0008-BET01.
+*DATA : IT0008PERNR LIKE it0008-PERNR.
+*" FF /MB
+
+*rp_provide_from_last p0037 space pn-begda pn-endda.
+*IF pnp-sw-found = '1'.
+
+MOVE p0008-pernr TO IT0008PERNR.
+MOVE p0008-BET01 TO IT0008BET01.
+MOVE p0008-TRFGR to line_itab-TRFGR.
+MOVE p0008-TRFST to line_itab-TRFST.
+*ENDIF.
+SELECT * from pA0008 into it0008 where pernr = p0037-pernr.
+
+move it0008-TRFGR to line_itab-TRFGR.
+move it0008-TRFST to line_itab-TRFST.
+move it0008-TRFAR to TRFAR.
+
+move it0008-BET01 to IT0008BET01.
+MOVE it0008-pernr TO IT0008PERNR.
+ENDSELECT.
+INFO_INDEXABLE = 'O'.
+
+move INFO_INDEXABLE to line_itab-INFO_INDEXABLE.
+
+*IF it0008-TRFGR ='HB'.
+*
+
+it0008-TRFST = '03'.
+it0008-TRFAR = 'HB'.
+it0008-TRFGR = 'HB'.
+SELECT * from T510 into it510 where TRFST = it0008-TRFST AND TRFGR = it0008-TRFGR AND TRFAR = it0008-TRFAR AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+move it510-betrg to montant.
+*move montant to line_itab-Brut_1etp.
+*ENDSELECT.
+*ELSE.
+SELECT * from T510 into it510 where TRFST = it0008-TRFST AND TRFGR = it0008-TRFGR AND TRFAR = it0008-TRFAR AND BEGDA <= pn-endda AND ENDDA >= pn-begda.
+move it510-betrg to montant.
+move montant to Brut_1etp.
+
+ENDSELECT.
+*ENDIF.
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+DATA: msgflg,
+      lgmst(30),
+      status       LIKE sy-subrc,
+      pme07        TYPE pme07,
+      sequ(3)      TYPE c,
+      seque(3)     TYPE i,
+      wa_t511k     TYPE t511k,
+      lgart_tab    TYPE STANDARD TABLE OF t539a,
+      wa_lgart_tab LIKE LINE OF lgart_tab.
+
+MOVE it0001-bukrs TO pme07-bukrs.
+MOVE it0001-werks TO pme07-werks.
+MOVE it0001-btrtl TO pme07-btrtl.
+MOVE it0001-persg TO pme07-persg.
+MOVE it0001-persk TO pme07-persk.
+MOVE '12' TO pme07-molga.
+REFRESH : lgart_tab, tbindbw.
+
+CALL FUNCTION 'HR_FEATURE_BACKFIELD'
+  EXPORTING
+    feature                     = 'LGMST'
+    struc_content               = pme07
+  IMPORTING
+    back                        = lgmst
+  EXCEPTIONS
+    dummy                       = 1
+    error_operation             = 2
+    no_backvalue                = 3
+    feature_not_generated       = 4
+    invalid_sign_in_funid       = 5
+    field_in_report_tab_in_pe03 = 6
+    OTHERS                      = 7.
+
+SELECT * FROM t539a INTO TABLE lgart_tab
+                    WHERE molga EQ '12'
+                    AND   lgmst EQ lgmst+3(8)
+                    AND   endda GE p0008-begda.
+
+seque = '010'.
+MOVE seque TO sequ.
+LOOP AT lgart_tab INTO wa_lgart_tab.
+  CLEAR tbindbw.
+
+  CASE wa_lgart_tab-lgart.
+
+    WHEN '8010'.
+      IF p0008-trfgr EQ 'HB'.
+       tbindbw-betrg = Brut_1etp. "p0008-bet01.
+     ELSE.
+       tbindbw-indbw = 'I'.
+   ENDIF.
+   WHEN '8016'.
+     IF p0008-trfgr EQ 'HB'.
+       tbindbw-betrg = line_itab-Brut_1etp.
+     ELSE.
+       tbindbw-indbw = 'I'.
+     ENDIF.
+   WHEN '8IND'.
+     SELECT * FROM t511k INTO wa_t511k WHERE konst EQ 'ZINDX'
+                           AND begda LE pn-endda
+                           AND endda GE pn-begda.
+     ENDSELECT.
+     tbindbw-anzhl = wa_t511k-kwert.
+     CLEAR wa_t511k.
+     tbindbw-indbw = 'I'.
+  WHEN OTHERS.
+    tbindbw-indbw = 'I'.
+ENDCASE.
+
+SELECT * FROM t511 WHERE lgart EQ wa_lgart_tab-lgart.
+  tbindbw-modna = t511-modna.
+  tbindbw-waers = p0008-waers.
+  tbindbw-lgart = wa_lgart_tab-lgart.
+  APPEND tbindbw.
+ENDSELECT.
+ENDLOOP.
+
+" Ajout du montant line_itab-Brut_1etp. dans une table fictive de type P00008
+DATA : p0008_f LIKE P0008.
+
+LOOP AT p0008 INTO p0008_f.
+MOVE Brut_1etp TO P0008_f-BET01.
+
+ENDLOOP.
+
+rp_provide_from_last p0016 space ld_begda ld_endda.
+CALL FUNCTION 'RP_EVALUATE_INDIRECTLY_P0008'
+EXPORTING
+pbegda = pn-begda
+pmolga = '12'
+pp0001 = p0001
+pp0007 = p0007
+pp0008 = p0008_f
+ppernr = p0037-pernr
+msgflg = 'X'
+TABLES
+ptbindbw = tbindbw
+EXCEPTIONS
+bad_parameters = 1
+error_at_indirect_evaluation = 2
+OTHERS = 3.
+DATA : montant_8050 LIKE tbindbw-betrg.
+
+  montant_8010 LIKE tbindbw-betrg.
+LOOP AT tbindbw WHERE lgart = '8050'.
+montant_8050 = tbindbw-betrg.
+
+ENDLOOP.
+
+LOOP AT tbindbw WHERE lgart = '8010'.
+
+ montant_8010 = tbindbw-betrg.
+ENDLOOP.
+
+move montant_8050 to line_itab-Brut_1etpok.
+*move montant_8010 to line_itab-Brut_1etpok.
+
+""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+" Quand HORS BAREME
+DATA : flagHB(1).
+DATA : bareme_min LIKE t510-betrg,
+bareme_max LIKE t510-betrg.
+DATA : echellon_PK(5) TYPE c.
+
+rp_provide_from_last p0008 space pn-begda pn-endda.
+IF pnp-sw-found = '1'.
+
+ENDIF.
+rp_provide_from_last p0001 space pn-begda pn-endda.
+IF pnp-sw-found = '1'.
+IF p0001-persk = 'SP' OR p0001-persk = 'S9' OR p0001-persk = 'S5' OR p0001-persk ='E9' OR p0001-persk ='PP' OR p0001-persk ='PA'.
+flagHB = 'X'.
+
+ MOVE p0008-trfgr TO contract_ch_cdd_data-bareme.
+ MOVE p0008-bsgrd TO contract_ch_cdd_data-taux_activite.  " 03/11/2014 - Taux d'activité. Par exemple: 75% - a tenir compte dans le calcul du traitement brut annuel indexé
+ENDIF.
+ENDIF.
+
+SELECT * FROM t510 WHERE begda <= pn-begda AND endda >= pn-endda
+AND trfgr = p0008-trfgr AND trfar = p0008-trfar AND trfst = '00'.
+MOVE t510-betrg TO bareme_min.
+
+ENDSELECT.
+
+SELECT MAX( trfst ) FROM t510 INTO echellon_pk WHERE begda <= pn-begda AND endda >= pn-endda
+AND trfgr = p0008-trfgr AND trfar = p0008-trfar.
+
+SELECT * FROM t510 WHERE begda <= pn-begda AND endda >= pn-endda
+                     AND trfgr = p0008-trfgr AND trfst EQ echellon_pk AND trfar = p0008-trfar.
+  MOVE t510-betrg TO bareme_max.
+
+ENDSELECT.
+*" DATA: msgflg,
+
+     lgmst(30),
+     status       LIKE sy-subrc,
+     pme07        TYPE pme07,
+     sequ(3)      TYPE c,
+     seque(3)     TYPE i,
+     wa_t511k     TYPE t511k,
+     lgart_tab    TYPE STANDARD TABLE OF t539a,
+     wa_lgart_tab LIKE LINE OF lgart_tab.
+MOVE p0001-bukrs TO pme07-bukrs.
+MOVE p0001-werks TO pme07-werks.
+MOVE p0001-btrtl TO pme07-btrtl.
+MOVE p0001-persg TO pme07-persg.
+MOVE p0001-persk TO pme07-persk.
+MOVE '12' TO pme07-molga.
+REFRESH : lgart_tab, tbindbw.
+
+CALL FUNCTION 'HR_FEATURE_BACKFIELD'
+EXPORTING
+feature = 'LGMST'
+struc_content = pme07
+IMPORTING
+back = lgmst
+EXCEPTIONS
+dummy = 1
+error_operation = 2
+no_backvalue = 3
+feature_not_generated = 4
+invalid_sign_in_funid = 5
+field_in_report_tab_in_pe03 = 6
+OTHERS = 7.
+
+SELECT * FROM t539a INTO TABLE lgart_tab
+WHERE molga EQ '12'
+AND lgmst EQ lgmst+3(8)
+AND endda GE p0008-begda. "p0008-begda.
+
+seque = '010'.
+MOVE seque TO sequ.
+LOOP AT lgart_tab INTO wa_lgart_tab.
+CLEAR tbindbw.
+
+CASE wa_lgart_tab-lgart.
+
+  WHEN '8010'.
+       IF p0008-trfgr EQ 'HB'.  "IF p0008-trfgr EQ 'HB'.
+      tbindbw-betrg = p0008-bet01. " p0008-bet01
+
+    ELSE.
+      tbindbw-indbw = 'I'.
+    ENDIF.
+
+  WHEN '8016'.
+    IF p0008-trfgr EQ 'HB'.  " IF p0008-trfgr EQ 'HB'.
+      tbindbw-betrg = p0008-bet02. "p0008-bet02.
+    ELSE.
+      tbindbw-indbw = 'I'.
+    ENDIF.
+
+  WHEN '8IND'.
+    SELECT * FROM t511k INTO wa_t511k WHERE konst EQ 'ZINDX'
+                          AND begda LE pn-endda
+                          AND endda GE pn-begda.
+    ENDSELECT.
+    tbindbw-anzhl = wa_t511k-kwert.
+    CLEAR wa_t511k.
+    tbindbw-indbw = 'I'.
+  WHEN OTHERS.
+    tbindbw-indbw = 'I'.
+ENDCASE.
+
+SELECT * FROM t511 WHERE lgart EQ wa_lgart_tab-lgart.
+  tbindbw-modna = t511-modna.
+  tbindbw-waers = p0008-waers. "p0008-waers.
+  tbindbw-lgart = wa_lgart_tab-lgart.
+  APPEND tbindbw.
+ENDSELECT.
+ENDLOOP.
+
+" rp_provide_from_last p0016 space ld_begda ld_endda.
+CALL FUNCTION 'RP_EVALUATE_INDIRECTLY_P0008'
+EXPORTING
+pbegda = pn-begda
+pmolga = '12'
+pp0001 = p0001
+pp0007 = p0007
+pp0008 = p0008 "p0008
+ppernr = p0037-pernr " p0008-pernr
+msgflg = 'X'
+TABLES
+ptbindbw = tbindbw
+EXCEPTIONS
+bad_parameters = 1
+error_at_indirect_evaluation = 2
+OTHERS = 3.
+
+LOOP AT tbindbw WHERE lgart = '8015'. """"""'8050'.
+montant_8050 = tbindbw-betrg.
+
+ENDLOOP.
+move montant_8050 to line_itab-Brut_1etpok.
+
+"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
+
+""""TEST affichage actif n
+*IF ( it0001-persg = '1' OR it0001-persg = '0' OR it0001-persg = '9' OR it0001-persg = '6' OR it0001-persg = '7' ) AND ( it0000-begda <= pn-begda AND it0000-begda <= pn-endda OR it0000-endda EQ '99991231').
+*
+APPEND line_itab TO itab.
+*ENDIF.
+ENDLOOP.
+
+ENDLOOP.
+
+END-OF-SELECTION.
+
+" Creates active sheet
+CREATE OBJECT lo_excel.
+
+" Get active sheet
+lo_worksheet = lo_excel->get_active_worksheet( ).
+lo_worksheet->set_title( ip_title = 'PTPEL').
+
+" sheet style (white background)
+lo_style = lo_excel->add_new_style( ).
+lo_style->fill->filltype = zcl_excel_style_fill=>c_fill_solid.
+lo_style->fill->fgcolor-rgb = zcl_excel_style_color=>c_white.
+lv_style_guid = lo_style->get_guid( ).
+
+" Get active sheet
+lo_worksheet = lo_excel->get_active_worksheet( ).
+lo_worksheet->zif_excel_sheet_properties~set_style( lv_style_guid ).
+
+lo_worksheet->zif_excel_sheet_protection~protected = zif_excel_sheet_protection=>c_protected.
+lo_worksheet->zif_excel_sheet_protection~password = zcl_excel_common=>encrypt_password( 'test' ).
+lo_worksheet->zif_excel_sheet_protection~sheet = zif_excel_sheet_protection=>c_active.
+lo_worksheet->zif_excel_sheet_protection~objects = zif_excel_sheet_protection=>c_active.
+lo_worksheet->zif_excel_sheet_protection~scenarios = zif_excel_sheet_protection=>c_active.
+" Create cell style for display only fields
+lo_style = lo_excel->add_new_style( ).
+lo_style->fill->filltype = zcl_excel_style_fill=>c_fill_solid.
+lo_style->fill->fgcolor-rgb = zcl_excel_style_color=>c_gray.
+lo_style->number_format->format_code = zcl_excel_style_number_format=>C_FORMAT_GENERAL.
+
+" Create cell style for display only date field
+lo_style_date = lo_excel->add_new_style( ).
+lo_style_date->fill->filltype = zcl_excel_style_fill=>c_fill_solid.
+lo_style_date->fill->fgcolor-rgb = zcl_excel_style_color=>c_gray.
+lo_style_date->number_format->format_code = zcl_excel_style_number_format=>c_format_date_ddmmyyyy.
+
+" Create cell style for editable fields
+lo_style_editable = lo_excel->add_new_style( ).
+lo_style_editable->protection->locked = zcl_excel_style_protection=>c_protection_unlocked.
+
+lt_field_catalog = zcl_excel_common=>get_fieldcatalog( ip_table = itab ).
+
+LOOP AT lt_field_catalog ASSIGNING <fs_field_catalog>.
+CASE <fs_field_catalog>-fieldname.
+ WHEN 'personid_ext'.
+   <fs_field_catalog>-position   = 1.
+   <fs_field_catalog>-dynpfld    = abap_true.
+   <fs_field_catalog>-style      = lo_style->get_guid( ).
+** WHEN 'CONNID'.
+** <fs_field_catalog>-position = 1.
+** <fs_field_catalog>-dynpfld = abap_true.
+** <fs_field_catalog>-style = lo_style->get_guid( ).
+** WHEN 'FLDATE'.
+** <fs_field_catalog>-position = 2.
+** <fs_field_catalog>-dynpfld = abap_true.
+** <fs_field_catalog>-style = lo_style_date->get_guid( ).
+** WHEN 'PRICE'.
+** <fs_field_catalog>-position = 4.
+** <fs_field_catalog>-dynpfld = abap_true.
+** <fs_field_catalog>-style = lo_style_editable->get_guid( ).
+** <fs_field_catalog>-totals_function = zcl_excel_table=>totals_function_sum.
+
+ WHEN OTHERS.
+   <fs_field_catalog>-dynpfld = abap_false.
+ENDCASE.
+ENDLOOP.
+ls_table_settings-table_style = zcl_excel_table=>builtinstyle_medium2.
+ls_table_settings-show_row_stripes = abap_true.
+
+lo_worksheet->bind_table( EXPORTING
+ip_table = itab
+it_field_catalog = lt_field_catalog
+is_table_settings = ls_table_settings
+IMPORTING
+es_table_settings = ls_table_settings_out ).
+
+lo_worksheet->freeze_panes( ip_num_rows = 3 ). "freeze column headers when scrolling
+
+lo_data_validation = lo_worksheet->add_new_data_validation( ).
+lo_data_validation->type = zcl_excel_data_validation=>c_type_custom.
+lv_row = ls_table_settings_out-top_left_row.
+CONDENSE lv_row.
+CONCATENATE 'ISNUMBER(' ls_table_settings_out-top_left_column lv_row ')' INTO lo_data_validation->formula1.
+lo_data_validation->cell_row = ls_table_settings_out-top_left_row.
+lo_data_validation->cell_column = ls_table_settings_out-top_left_column.
+lo_data_validation->cell_row_to = ls_table_settings_out-bottom_right_row.
+lo_data_validation->cell_column_to = ls_table_settings_out-bottom_right_column.
+*** Create output
+lcl_output=>output( lo_excel ).`
+
+DATA CODE
+
+`&---------------------------------------------------------------------
+*& Include ZHRA_PTPEL_TEST_EXCEL
+&---------------------------------------------------------------------
+
+INFOTYPES: 9049,0037,0006,0021,0002,0009,0001,0105, 0000, 0008, 0007,0101.
+
+tables: pernr, pa0709,pa0037,T502T,pa0138, pa0009,bnka,pa0101, pa0001, pa9049,pa0105, pa0000, pa0008,pa0007,t539a,t511,pa0006,t510,T5B0K.
+
+NODES: peras.
+
+data : it9049 like p9049 occurs 0 with header line,
+it0037 like pa0037 occurs 0 with header line,
+it0709 like pa0709 occurs 0 with header line,
+it0002 like pa0002 occurs 0 with header line,
+it0006 like pa0006 occurs 0 with HEADER LINE,
+it502t like T502T occurs 0 WITH HEADER LINE,
+it0021 like pa0021 occurs 0 WITH HEADER LINE,
+it0138 like pa0138 occurs 0 WITH HEADER LINE,
+it0009 like pa0009 occurs 0 WITH HEADER LINE,
+it0001 like pa0001 occurs 0 WITH HEADER LINE,
+itbnka like bnka occurs 0 WITH HEADER LINE,
+it0105 like pa0105 occurs 0 WITH HEADER LINE,
+it0008 like pa0008 occurs 0 WITH HEADER LINE,
+it510 like T510 occurs 0 WITH HEADER LINE,
+it0000 like pa0000 occurs 0 WITH HEADER LINE,
+it0101 like pa0101 occurs 0 WITH HEADER LINE,
+itT5B0K like T5B0K occurs 0 WITH HEADER LINE.
+
+data : personid_ext like PA0709-personid_ext,
+Conj_cohab_ulb_txt(20),
+nbr_enfants_handi type i,
+nbr_enfants type i,
+nbr_enfantsmoins18 type i,
+nbr_enfantsm18 type i,
+nbr_enfantsplus18 type i,
+nbr_enfantsp18 type i,
+langue type i,
+
+  iban like pa0009-IBAN,
+SWIFT like pa0009-SWIFT,
+Compte_bancaire(30),
+cle_bancaire(20),
+fonction(2),
+statut_juridique type i,
+duree(5),
+INFO_INDEXABLE(2),
+ZZETP_ADM type p decimals 2,
+
+   montant type p decimals 2,
+
+
+   TRFGR like pa0008-TRFGR,
+    TRFST like pa0008-TRFST,
+    TRFAR like pa0008-TRFAR,
+
+
+    Brut_1etp like q0008-BETRG,
+   MASSN(2),
+   MASSG(2),
+   motif_depart(4),
+AGE type i
+
+   .
+data: BEGIN OF struc_itab,
+debut_per_conc like pa0037-BEGDA,
+fin_per_conc like pa0037-ENDDA,
+
+    personid_ext like PA0709-personid_ext,
+    pernr type p_pernr,
+    centre_frais type string,
+    Nom like pa0002-NACHN,
+    Prenom like pa0002-VORNA,
+    Date_naissance like pa0002-gbdat,
+    niss like pa0002-ZRSZRR,
+    sexe type i,
+    Rue like pa0006-STRAS,
+    Complement_adresse like pa0006-locat,
+    Numero like pa0006-HSNMR,
+    Boite like pa0006-POSTA,
+    CP like pa0006-PSTLZ,
+    Ville like pa0006-ORT01,
+    Pays like T5B0K-BELDK,
+    Eciv_ULB like Q0002-FATXT,
+    Conj_cohab_ulb(20),
+*eciv_ULB_code type i,
+
+    Eciv_AG_Code type c,
+    effet_civil like pa0002-FAMDT,
+    nbre_enfantsIT0002 like pa0002-ANZKD,
+    nbr_enfants_handi type i,
+    langue type i,
+
+
+
+    compte_bancaire(30),
+statut_juridique type i,
+fonction like pa0001-persk,
+DATE_IN_VERIF_PTPEL like pa9049-DATE_IN_VERIF_PTPEL,
+Date_entre_act like pa0001-begda,
+duree(5),
+
+    date_depart like pa0000-begda,
+    motif_depart(4),
+    ZZETP_ADM type p decimals 2,
+    TRFGR like pa0008-TRFGR,
+    TRFST like pa0008-TRFST,
+    INFO_INDEXABLE(2),
+
+    Brut_1etpok like q0008-BETRG,
+    mail like pa0105-USRID_LONG,
+   END OF struc_itab.
+DATA: itab like table of struc_itab. " occurs 0 with header line.
+DATA: line_itab LIKE LINE OF itab.
+
+DATA: BEGIN OF TBINDBW OCCURS 20,
+SEQNR(3).
+INCLUDE STRUCTURE PTBINDBW.
+DATA: END OF TBINDBW .
+DATA: ok_code LIKE sy-ucomm,
+g_container0001 TYPE scrfname VALUE 'ALV_CONT',
+grid_0001 TYPE REF TO cl_gui_alv_grid,
+g_custom_container_0001 TYPE REF TO cl_gui_custom_container,
+alv TYPE REF TO cl_salv_table,
+is_layout TYPE lvc_s_layo.
+
+DATA: it_fieldcatalog TYPE lvc_t_fcat.
+DATA: wa_fieldcatalog TYPE lvc_s_fcat.`
